@@ -1,8 +1,15 @@
 import os
+import re
 from typing import Optional
 from google.oauth2.credentials import Credentials
 from google.auth.transport.requests import Request as GoogleRequest
 from googleapiclient.discovery import build
+
+_HAS_TZ = re.compile(r'(Z|[+-]\d{2}:\d{2})$')
+
+def _rfc3339(time_str: str) -> str:
+    """Ensure a datetime string has valid RFC3339 timezone — never double-suffix it."""
+    return time_str if _HAS_TZ.search(time_str) else time_str + "Z"
 
 
 def _get_service():
@@ -38,9 +45,9 @@ def list_events(
         "maxResults": 20,
     }
     if time_min:
-        params["timeMin"] = time_min if "Z" in time_min or "+" in time_min else time_min + "Z"
+        params["timeMin"] = _rfc3339(time_min)
     if time_max:
-        params["timeMax"] = time_max if "Z" in time_max or "+" in time_max else time_max + "Z"
+        params["timeMax"] = _rfc3339(time_max)
     if query:
         params["q"] = query
 

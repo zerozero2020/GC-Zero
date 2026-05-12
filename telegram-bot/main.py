@@ -59,18 +59,22 @@ async def _handle(data: dict) -> None:
     chat_id: int = message["chat"]["id"]
     text: str = message.get("text", "").strip()
 
+    logger.info("Incoming from chat_id=%s: %r", chat_id, text)
+
     if not text or not text.startswith("/"):
         await _send(chat_id, "Send a command — try /help to see what's available.")
         return
 
-    logger.info("Command from %s: %s", chat_id, text)
     try:
         reply = _route(text)
+        logger.info("Sending reply: %r", reply[:80])
+        await _send(chat_id, reply)
     except Exception as e:
-        logger.exception("Error handling command")
-        reply = f"Something went wrong: {e}"
-
-    await _send(chat_id, reply)
+        logger.exception("Error handling command %r", text)
+        try:
+            await _send(chat_id, f"Something went wrong: {e}")
+        except Exception:
+            logger.exception("Failed to send error reply")
 
 
 @app.post("/webhook/{token}")

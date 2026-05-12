@@ -1,0 +1,13 @@
+# Secrets — never commit these
+telegram-bot/.env
+telegram-bot/credentials.json
+
+# Python
+telegram-bot/.venv/
+__pycache__/
+*.pyc
+*.pyo
+.DS_Store
+
+# Personal notes (stays local)
+telegram-bot/suggestions.md

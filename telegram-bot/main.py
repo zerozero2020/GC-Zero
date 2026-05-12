@@ -89,7 +89,7 @@ async def webhook(token: str, request: Request):
 @app.post("/setup-webhook")
 async def setup_webhook(request: Request):
     """Call once after deploying to register the Telegram webhook URL."""
-    base = str(request.base_url).rstrip("/")
+    base = str(request.base_url).rstrip("/").replace("http://", "https://")
     url = f"{base}/webhook/{TOKEN}"
     async with httpx.AsyncClient() as client:
         resp = await client.post(f"{TELEGRAM_API}/setWebhook", json={"url": url})

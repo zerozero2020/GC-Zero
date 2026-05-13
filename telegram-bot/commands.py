@@ -187,21 +187,34 @@ def _fmt_event(e: dict) -> str:
     return f"• *{e['summary']}* — {d.strftime('%a %b %-d')} (all day)"
 
 
-def _fmt_event_detail(e: dict) -> str:
-    start = e["start"]
-    summary = e["summary"]
-    if "T" in start:
-        dt = datetime.fromisoformat(start).astimezone(EASTERN)
-        header = f"*{summary}*\n{dt.strftime('%A, %b %-d')} at {dt.strftime('%-I:%M %p')}"
-    else:
-        d = date.fromisoformat(start)
-        header = f"*{summary}*\n{d.strftime('%A, %b %-d')} — all day"
-    extras = []
-    if e.get("location"):
-        extras.append(f"📍 {e['location']}")
-    if e.get("description"):
-        extras.append(f"📝 {e['description']}")
-    return header + ("\n" + "\n".join(extras) if extras else "")
+def _fmt_grouped_events(header: str, events: list) -> str:
+    """Format events grouped by day, with each day as a bold heading."""
+    from collections import defaultdict
+    groups: dict[date, list] = defaultdict(list)
+    for e in events:
+        start = e["start"]
+        if "T" in start:
+            d = datetime.fromisoformat(start).astimezone(EASTERN).date()
+        else:
+            d = date.fromisoformat(start)
+        groups[d].append(e)
+
+    lines = [header]
+    for d in sorted(groups):
+        lines.append(f"\n*{d.strftime('%A, %b %-d')}*")
+        for e in groups[d]:
+            start = e["start"]
+            if "T" in start:
+                dt = datetime.fromisoformat(start).astimezone(EASTERN)
+                line = f"• {e['summary']} at {dt.strftime('%-I:%M %p')}"
+            else:
+                line = f"• {e['summary']} — all day"
+            if e.get("location"):
+                line += f"\n  📍 {e['location']}"
+            if e.get("description"):
+                line += f"\n  📝 {e['description']}"
+            lines.append(line)
+    return "\n".join(lines)
 
 
 def _read_address_book() -> str:
@@ -268,7 +281,6 @@ def _week_end_dt(from_dt: datetime) -> datetime:
 
 
 def handle_summary() -> str:
-    """Events from now through end of this Sunday, with full detail."""
     now = datetime.now(EASTERN)
     week_end = _week_end_dt(now)
     events = calendar_client.list_events(
@@ -277,11 +289,10 @@ def handle_summary() -> str:
     )
     if not events:
         return "Nothing left on your calendar this week."
-    return "*This week:*\n\n" + "\n\n".join(_fmt_event_detail(e) for e in events)
+    return _fmt_grouped_events("*This week:*", events)
 
 
 def handle_weekly_preview() -> str:
-    """Full upcoming week (Mon–Sun), used for the Sunday night notification."""
     now = datetime.now(EASTERN)
     next_monday = _week_end_dt(now)
     next_next_monday = next_monday + timedelta(days=7)
@@ -291,7 +302,7 @@ def handle_weekly_preview() -> str:
     )
     if not events:
         return "Nothing on your calendar next week."
-    return "*Upcoming week:*\n\n" + "\n\n".join(_fmt_event_detail(e) for e in events)
+    return _fmt_grouped_events("*Upcoming week:*", events)
 
 
 # ─── /add ─────────────────────────────────────────────────────────────────────

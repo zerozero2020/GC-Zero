@@ -35,11 +35,16 @@ _DS = {
 COLOR_RULES = [
     (["birthday"], "5"),
     (["avdg"], "9"),
-    (["trip", "festival", "rave", "travel", "vacation"], "7"),
+    (["trip", "festival", "rave", "travel", "vacation", "flight"], "7"),
     (["christine"], "4"),
     (["dentist", "doctor", "haircut", "mechanic", "appointment", "physical"], "11"),
 ]
 DEFAULT_COLOR = "10"
+_NAME_SKIP = {
+    "with", "and", "the", "at", "in", "of", "for", "to", "a", "an",
+    "from", "by", "on", "my", "your", "his", "her", "our", "their",
+    "time", "day", "off", "work", "event", "tbd", "new", "york",
+}
 COLOR_NAMES = {"9": "AVDG", "7": "Trip", "4": "Christine", "10": "Friends", "11": "Appt", "5": "Birthday"}
 LONG_MEALS = {"lunch", "dinner", "brunch"}
 
@@ -75,11 +80,22 @@ HELP_TEXT = """\
 
 # ─── helpers ──────────────────────────────────────────────────────────────────
 
+def _has_name(title: str) -> bool:
+    words = title.split()
+    for word in words[1:]:
+        clean = word.strip("'s.,!?-")
+        if clean and clean[0].isupper() and clean.lower() not in _NAME_SKIP:
+            return True
+    return False
+
+
 def _infer_color(title: str) -> str:
     lower = title.lower()
     for keywords, cid in COLOR_RULES:
         if any(k in lower for k in keywords):
             return cid
+    if _has_name(title):
+        return "10"  # Friends
     return DEFAULT_COLOR
 
 

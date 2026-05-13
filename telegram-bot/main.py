@@ -160,6 +160,13 @@ async def setup_webhook(request: Request):
     return result
 
 
+@app.post("/test-weekly-summary")
+async def test_weekly_summary():
+    """Manually trigger the Sunday notification for testing."""
+    await _send_weekly_summary()
+    return {"ok": True, "sent_to": _owner_chat_id}
+
+
 @app.get("/health")
 async def health():
     return {"status": "ok"}

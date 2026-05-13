@@ -14,6 +14,7 @@ Command handlers for the Telegram calendar bot.
 
 import os
 import re
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta, date
 from zoneinfo import ZoneInfo
 
@@ -47,6 +48,59 @@ _NAME_SKIP = {
 }
 COLOR_NAMES = {"9": "AVDG", "7": "Trip", "4": "Christine", "10": "Friends", "11": "Appt", "5": "Birthday"}
 LONG_MEALS = {"lunch", "dinner", "brunch"}
+
+_CATEGORY_MAP = {
+    "1": "10", "friends": "10",
+    "2": "7",  "trip": "7",
+    "3": "11", "appt": "11", "appointment": "11",
+    "4": "5",  "birthday": "5",
+    "5": "9",  "avdg": "9",
+    "6": "4",  "christine": "4",
+    "7": "10", "none": "10", "no color": "10", "no": "10",
+}
+_CATEGORY_PROMPT_LINES = (
+    "1. Friends\n2. Trip\n3. Appt\n4. Birthday\n5. AVDG\n6. Christine\n7. No color"
+)
+
+
+@dataclass
+class PendingEvent:
+    summary: str
+    start_time: str
+    end_time: str
+    recurrence: list = field(default_factory=list)
+
+    @property
+    def prompt(self) -> str:
+        return (
+            f"Not sure which category to use for *{self.summary}* — which one?\n"
+            + _CATEGORY_PROMPT_LINES
+        )
+
+
+def parse_category_reply(text: str) -> str | None:
+    return _CATEGORY_MAP.get(text.strip().lower())
+
+
+def complete_pending(pending: PendingEvent, color_id: str) -> str:
+    kwargs: dict = {
+        "summary": pending.summary,
+        "start_time": pending.start_time,
+        "end_time": pending.end_time,
+        "color_id": color_id,
+    }
+    if pending.recurrence:
+        kwargs["recurrence"] = pending.recurrence
+    result = calendar_client.create_event(**kwargs)
+    start = result["start"]
+    if "T" in start:
+        dt = datetime.fromisoformat(start).astimezone(EASTERN)
+        disp = dt.strftime("%a %b %-d, %-I:%M %p")
+    else:
+        d = date.fromisoformat(start)
+        disp = f"{d.strftime('%a %b %-d')} (all day)"
+    category = COLOR_NAMES.get(color_id, "Event")
+    return f"Added *{result['summary']}* — {disp} ({category})."
 
 HELP_TEXT = """\
 *Calendar Bot Commands*
@@ -89,14 +143,14 @@ def _has_name(title: str) -> bool:
     return False
 
 
-def _infer_color(title: str) -> str:
+def _infer_color(title: str) -> str | None:
     lower = title.lower()
     for keywords, cid in COLOR_RULES:
         if any(k in lower for k in keywords):
             return cid
     if _has_name(title):
         return "10"  # Friends
-    return DEFAULT_COLOR
+    return None  # uncertain — caller should ask
 
 
 def _infer_duration(title: str) -> int:
@@ -215,7 +269,7 @@ def handle_add(text: str) -> str:
     color_id = _infer_color(title)
     target_date = parsed_dt.date()
 
-    # Birthday → all-day, yearly recurring
+    # Birthday → all-day, yearly recurring (color always certain)
     if color_id == "5":
         if "birthday" not in title.lower():
             name = title.rstrip("'s").rstrip("s")
@@ -232,6 +286,12 @@ def handle_add(text: str) -> str:
     # Trip or no time → all-day
     if color_id == "7" or not _has_time(date_str):
         end_date = _parse_end_of_range(date_text, target_date) if color_id == "7" else target_date + timedelta(days=1)
+        if color_id is None:
+            return PendingEvent(
+                summary=title,
+                start_time=target_date.isoformat(),
+                end_time=end_date.isoformat(),
+            )
         result = calendar_client.create_event(
             summary=title,
             start_time=target_date.isoformat(),
@@ -249,6 +309,12 @@ def handle_add(text: str) -> str:
     duration = _infer_duration(title)
     end_dt = parsed_dt + timedelta(minutes=duration)
     offset = _offset(parsed_dt)
+    if color_id is None:
+        return PendingEvent(
+            summary=title,
+            start_time=parsed_dt.strftime(f"%Y-%m-%dT%H:%M:%S{offset}"),
+            end_time=end_dt.strftime(f"%Y-%m-%dT%H:%M:%S{offset}"),
+        )
     result = calendar_client.create_event(
         summary=title,
         start_time=parsed_dt.strftime(f"%Y-%m-%dT%H:%M:%S{offset}"),

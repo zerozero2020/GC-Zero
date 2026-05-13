@@ -18,6 +18,8 @@ TELEGRAM_API = f"https://api.telegram.org/bot{TOKEN}"
 
 app = FastAPI()
 
+_pending: dict[int, commands.PendingEvent] = {}
+
 
 async def _send(chat_id: int, text: str) -> None:
     async with httpx.AsyncClient() as client:
@@ -61,12 +63,34 @@ async def _handle(data: dict) -> None:
 
     logger.info("Incoming from chat_id=%s: %r", chat_id, text)
 
-    if not text or not text.startswith("/"):
+    if not text:
+        return
+
+    # Pending color selection — user is replying with a category choice
+    if not text.startswith("/") and chat_id in _pending:
+        color_id = commands.parse_category_reply(text)
+        if color_id is None:
+            await _send(chat_id, "Didn't get that — reply with a number (1–7) or category name.")
+            return
+        pending = _pending.pop(chat_id)
+        try:
+            reply = commands.complete_pending(pending, color_id)
+            logger.info("Completed pending event: %r", reply[:80])
+            await _send(chat_id, reply)
+        except Exception as e:
+            logger.exception("Error completing pending event")
+            await _send(chat_id, f"Something went wrong: {e}")
+        return
+
+    if not text.startswith("/"):
         await _send(chat_id, "Send a command — try /help to see what's available.")
         return
 
     try:
         reply = _route(text)
+        if isinstance(reply, commands.PendingEvent):
+            _pending[chat_id] = reply
+            reply = reply.prompt
         logger.info("Sending reply: %r", reply[:80])
         await _send(chat_id, reply)
     except Exception as e:

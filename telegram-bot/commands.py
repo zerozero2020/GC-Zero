@@ -1,15 +1,15 @@
 """
 Command handlers for the Telegram calendar bot.
 
-  /add <title> <date/time>           Create a new event
-  /avdg <site> <day>                 Tag an AVDG workday
-  /avdg off <day>                    Mark a day off (removes AVDG, adds Off Work)
-  /edit <title> <date> > <change>    Modify an event
-  /delete <title> <date>             Delete an event
-  /week                              Next 7 days
-  /today                             Today's events
-  /suggestions <note>                Log a suggestion for improving the bot
-  /help                              Command list
+  /add <title>, <date/time>           Create a new event
+  /avdg <site> <day>                  Tag an AVDG workday
+  /avdg off <day>                     Mark a day off (removes AVDG, adds Off Work)
+  /edit <title>, <date> > <change>    Modify an event
+  /delete <title>, <date>             Delete an event
+  /week                               Next 7 days
+  /today                              Today's events
+  /suggestions <note>                 Log a suggestion for improving the bot
+  /help                               Command list
 """
 
 import os
@@ -46,24 +46,24 @@ LONG_MEALS = {"lunch", "dinner", "brunch"}
 HELP_TEXT = """\
 *Calendar Bot Commands*
 
-`/add <title> <date/time>`
-  /add Lunch with Rosie May 17 noon
-  /add Dentist tomorrow 2pm
-  /add Coachella trip April 11-13
-  /add Mom's Birthday March 15
+`/add <title>, <date/time>`
+  /add Lunch with Rosie, May 17 noon
+  /add Dentist, tomorrow 2pm
+  /add Coachella trip, April 11-13
+  /add Mom's Birthday, March 15
 
 `/avdg <site> <day>`
   /avdg Hines Monday
   /avdg PAN Tue May 19
   /avdg off Wednesday
 
-`/edit <title> <date> > <change>`
-  /edit dentist May 15 > 3pm
-  /edit lunch Rosie May 17 > move to 1pm
-  /edit dentist May 15 > location 123 Main St
+`/edit <title>, <date> > <change>`
+  /edit dentist, May 15 > 3pm
+  /edit lunch Rosie, May 17 > move to 1pm
+  /edit dentist, May 15 > location 123 Main St
 
-`/delete <title> <date>`
-  /delete dentist May 15
+`/delete <title>, <date>`
+  /delete dentist, May 15
 
 `/week`   — next 7 days
 `/today`  — today's events
@@ -173,24 +173,29 @@ def handle_week() -> str:
 
 def handle_add(text: str) -> str:
     if not text:
-        return "Usage: /add <title> <date/time>\nExample: /add Lunch with Rosie May 17 noon"
+        return "Usage: /add <title>, <date/time>\nExample: /add Lunch with Rosie, May 17 noon"
 
-    found = search_dates(text, settings=_DS, languages=["en"])
+    if "," not in text:
+        return "Separate the title and date with a comma.\nExample: /add Dentist, tomorrow 2pm"
+
+    title, date_text = text.split(",", 1)
+    title = title.strip() or "Event"
+    date_text = date_text.strip()
+
+    found = search_dates(date_text, settings=_DS, languages=["en"]) if date_text else None
 
     # No date detected → all-day TBD today
     if not found:
         today = date.today()
         result = calendar_client.create_event(
-            summary=text.strip() + " (Time TBD)",
+            summary=title + " (Time TBD)",
             start_time=today.isoformat(),
             end_time=(today + timedelta(days=1)).isoformat(),
-            color_id=_infer_color(text),
+            color_id=_infer_color(title),
         )
         return f"Added *{result['summary']}* — today, all day (no date given)."
 
     date_str, parsed_dt = found[0]
-    title = re.sub(re.escape(date_str), "", text, flags=re.IGNORECASE)
-    title = re.sub(r"\s{2,}", " ", title).strip(" ,.-") or "Event"
     color_id = _infer_color(title)
     target_date = parsed_dt.date()
 
@@ -210,7 +215,7 @@ def handle_add(text: str) -> str:
 
     # Trip or no time → all-day
     if color_id == "7" or not _has_time(date_str):
-        end_date = _parse_end_of_range(text, target_date) if color_id == "7" else target_date + timedelta(days=1)
+        end_date = _parse_end_of_range(date_text, target_date) if color_id == "7" else target_date + timedelta(days=1)
         result = calendar_client.create_event(
             summary=title,
             start_time=target_date.isoformat(),
@@ -294,14 +299,19 @@ def handle_avdg(text: str) -> str:
 
 def handle_delete(text: str) -> str:
     if not text:
-        return "Usage: /delete <title> <date>\nExample: /delete dentist May 15"
+        return "Usage: /delete <title>, <date>\nExample: /delete dentist, May 15"
 
-    found = search_dates(text, settings=_DS, languages=["en"])
-    if not found:
-        return "Please include a date. Example: /delete dentist May 15"
+    if "," not in text:
+        return "Separate the title and date with a comma.\nExample: /delete dentist, May 15"
 
-    date_str, parsed_dt = found[0]
-    query = re.sub(re.escape(date_str), "", text, flags=re.IGNORECASE).strip(" ,.-")
+    query, date_text = text.split(",", 1)
+    query = query.strip()
+    date_text = date_text.strip()
+
+    parsed_dt = dateparser.parse(date_text, settings=_DS)
+    if not parsed_dt:
+        return f"Couldn't parse date '{date_text}'. Try: May 15, tomorrow, Monday."
+
     target = parsed_dt.date()
     day_start = datetime(target.year, target.month, target.day, tzinfo=EASTERN)
 
@@ -335,23 +345,28 @@ def handle_delete(text: str) -> str:
 def handle_edit(text: str) -> str:
     if ">" not in text:
         return (
-            "Usage: /edit <title> <date> > <change>\n"
+            "Usage: /edit <title>, <date> > <change>\n"
             "Examples:\n"
-            "  /edit dentist May 15 > 3pm\n"
-            "  /edit lunch Rosie May 17 > move to 1pm\n"
-            "  /edit dentist May 15 > location 123 Main St\n"
-            "  /edit dentist May 15 > title New Name"
+            "  /edit dentist, May 15 > 3pm\n"
+            "  /edit lunch Rosie, May 17 > move to 1pm\n"
+            "  /edit dentist, May 15 > location 123 Main St\n"
+            "  /edit dentist, May 15 > title New Name"
         )
 
     search_part, change_part = text.split(">", 1)
     search_part, change_part = search_part.strip(), change_part.strip()
 
-    found = search_dates(search_part, settings=_DS, languages=["en"])
-    if not found:
-        return "Include the event date before the >. Example: /edit dentist May 15 > 3pm"
+    if "," not in search_part:
+        return "Separate the title and date with a comma.\nExample: /edit dentist, May 15 > 3pm"
 
-    date_str, parsed_dt = found[0]
-    query = re.sub(re.escape(date_str), "", search_part, flags=re.IGNORECASE).strip(" ,.-")
+    query, date_text = search_part.split(",", 1)
+    query = query.strip()
+    date_text = date_text.strip()
+
+    parsed_dt = dateparser.parse(date_text, settings=_DS)
+    if not parsed_dt:
+        return f"Couldn't parse date '{date_text}'. Try: May 15, tomorrow, Monday."
+
     target = parsed_dt.date()
     day_start = datetime(target.year, target.month, target.day, tzinfo=EASTERN)
 

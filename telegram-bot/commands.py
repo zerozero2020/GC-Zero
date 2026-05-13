@@ -1,15 +1,16 @@
 """
 Command handlers for the Telegram calendar bot.
 
-  /add <title>, <date/time>           Create a new event
-  /avdg <site> <day>                  Tag an AVDG workday
-  /avdg off <day>                     Mark a day off (removes AVDG, adds Off Work)
-  /edit <title>, <date> > <change>    Modify an event
-  /delete <title>, <date>             Delete an event
-  /week                               Next 7 days
-  /today                              Today's events
-  /suggestions <note>                 Log a suggestion for improving the bot
-  /help                               Command list
+  /add <title>, <date/time> [: <title>, <date/time> ...]   Create one or more events
+  /avdg <site> <day>                                        Tag an AVDG workday
+  /avdg off <day>                                           Mark a day off
+  /edit <title>, <date> > <change>                          Modify an event
+  /delete <title>, <date> [: <title>, <date> ...]           Delete one or more events
+  /summary                                                  This week's events (detailed)
+  /week                                                     Next 7 days
+  /today                                                    Today's events
+  /suggestions <note>                                       Log a suggestion
+  /help                                                     Command list
 """
 
 import os
@@ -110,6 +111,7 @@ HELP_TEXT = """\
   /add Dentist, tomorrow 2pm
   /add Coachella trip, April 11-13
   /add Mom's Birthday, March 15
+  _Batch:_ /add Dentist, May 15 2pm : Gym, May 16 7am
 
 `/avdg <site> <day>`
   /avdg Hines Monday
@@ -123,9 +125,11 @@ HELP_TEXT = """\
 
 `/delete <title>, <date>`
   /delete dentist, May 15
+  _Batch:_ /delete dentist, May 15 : gym, May 16
 
-`/week`   — next 7 days
-`/today`  — today's events
+`/summary` — this week's events with details
+`/week`    — next 7 days
+`/today`   — today's events
 
 `/suggestions <note>`
   /suggestions add reminder support to events
@@ -181,6 +185,23 @@ def _fmt_event(e: dict) -> str:
         return f"• *{e['summary']}* — {dt.strftime('%a %b %-d, %-I:%M %p')}"
     d = date.fromisoformat(start)
     return f"• *{e['summary']}* — {d.strftime('%a %b %-d')} (all day)"
+
+
+def _fmt_event_detail(e: dict) -> str:
+    start = e["start"]
+    summary = e["summary"]
+    if "T" in start:
+        dt = datetime.fromisoformat(start).astimezone(EASTERN)
+        header = f"*{summary}*\n{dt.strftime('%A, %b %-d')} at {dt.strftime('%-I:%M %p')}"
+    else:
+        d = date.fromisoformat(start)
+        header = f"*{summary}*\n{d.strftime('%A, %b %-d')} — all day"
+    extras = []
+    if e.get("location"):
+        extras.append(f"📍 {e['location']}")
+    if e.get("description"):
+        extras.append(f"📝 {e['description']}")
+    return header + ("\n" + "\n".join(extras) if extras else "")
 
 
 def _read_address_book() -> str:
@@ -239,29 +260,54 @@ def handle_week() -> str:
     return "*Next 7 days:*\n" + "\n".join(_fmt_event(e) for e in events)
 
 
+def _week_end_dt(from_dt: datetime) -> datetime:
+    """Return start of the Monday following from_dt's week (i.e. exclusive end of Sunday)."""
+    days_to_monday = (7 - from_dt.weekday()) % 7 or 7
+    base = from_dt.replace(hour=0, minute=0, second=0, microsecond=0)
+    return base + timedelta(days=days_to_monday)
+
+
+def handle_summary() -> str:
+    """Events from now through end of this Sunday, with full detail."""
+    now = datetime.now(EASTERN)
+    week_end = _week_end_dt(now)
+    events = calendar_client.list_events(
+        time_min=now.isoformat(),
+        time_max=week_end.isoformat(),
+    )
+    if not events:
+        return "Nothing left on your calendar this week."
+    return "*This week:*\n\n" + "\n\n".join(_fmt_event_detail(e) for e in events)
+
+
+def handle_weekly_preview() -> str:
+    """Full upcoming week (Mon–Sun), used for the Sunday night notification."""
+    now = datetime.now(EASTERN)
+    next_monday = _week_end_dt(now)
+    next_next_monday = next_monday + timedelta(days=7)
+    events = calendar_client.list_events(
+        time_min=next_monday.isoformat(),
+        time_max=next_next_monday.isoformat(),
+    )
+    if not events:
+        return "Nothing on your calendar next week."
+    return "*Upcoming week:*\n\n" + "\n\n".join(_fmt_event_detail(e) for e in events)
+
+
 # ─── /add ─────────────────────────────────────────────────────────────────────
 
-def handle_add(text: str) -> str:
-    if not text:
-        return "Usage: /add <title>, <date/time>\nExample: /add Lunch with Rosie, May 17 noon"
-
-    if "," not in text:
-        return "Separate the title and date with a comma.\nExample: /add Dentist, tomorrow 2pm"
-
-    title, date_text = text.split(",", 1)
-    title = title.strip() or "Event"
-    date_text = date_text.strip()
-
+def _add_one(title: str, date_text: str) -> str | PendingEvent:
+    """Add a single event. Returns a confirmation string or PendingEvent if color is unknown."""
     found = search_dates(date_text, settings=_DS, languages=["en"]) if date_text else None
 
-    # No date detected → all-day TBD today
+    # No date detected → all-day TBD today using default color
     if not found:
         today = date.today()
         result = calendar_client.create_event(
             summary=title + " (Time TBD)",
             start_time=today.isoformat(),
             end_time=(today + timedelta(days=1)).isoformat(),
-            color_id=_infer_color(title),
+            color_id=_infer_color(title) or DEFAULT_COLOR,
         )
         return f"Added *{result['summary']}* — today, all day (no date given)."
 
@@ -325,6 +371,41 @@ def handle_add(text: str) -> str:
     return f"Added *{result['summary']}* — {target_date.strftime('%a %b %-d')}, {t_disp} ({COLOR_NAMES.get(color_id, 'Event')})."
 
 
+def handle_add(text: str) -> str | PendingEvent:
+    if not text:
+        return "Usage: /add <title>, <date/time>\nExample: /add Lunch with Rosie, May 17 noon"
+
+    entries = [e.strip() for e in text.split(" : ")]
+
+    if len(entries) == 1:
+        # Single event — ask for color if unknown
+        if "," not in text:
+            return "Separate the title and date with a comma.\nExample: /add Dentist, tomorrow 2pm"
+        title, date_text = text.split(",", 1)
+        return _add_one(title.strip() or "Event", date_text.strip())
+
+    # Batch — use default color for unknowns, no interactive asking
+    results = []
+    for entry in entries:
+        if "," not in entry:
+            results.append(f"⚠️ Skipped '{entry}' — missing comma between title and date.")
+            continue
+        title, date_text = entry.split(",", 1)
+        outcome = _add_one(title.strip() or "Event", date_text.strip())
+        if isinstance(outcome, PendingEvent):
+            r = calendar_client.create_event(
+                summary=outcome.summary,
+                start_time=outcome.start_time,
+                end_time=outcome.end_time,
+                color_id=DEFAULT_COLOR,
+                **({"recurrence": outcome.recurrence} if outcome.recurrence else {}),
+            )
+            results.append(f"Added *{r['summary']}* (category unclear — used default color).")
+        else:
+            results.append(outcome)
+    return "\n".join(results)
+
+
 # ─── /avdg ────────────────────────────────────────────────────────────────────
 
 def handle_avdg(text: str) -> str:
@@ -379,14 +460,11 @@ def handle_avdg(text: str) -> str:
 
 # ─── /delete ──────────────────────────────────────────────────────────────────
 
-def handle_delete(text: str) -> str:
-    if not text:
-        return "Usage: /delete <title>, <date>\nExample: /delete dentist, May 15"
+def _delete_one(entry: str) -> str:
+    if "," not in entry:
+        return f"⚠️ Skipped '{entry}' — missing comma between title and date."
 
-    if "," not in text:
-        return "Separate the title and date with a comma.\nExample: /delete dentist, May 15"
-
-    query, date_text = text.split(",", 1)
+    query, date_text = entry.split(",", 1)
     query = query.strip()
     date_text = date_text.strip()
 
@@ -406,7 +484,6 @@ def handle_delete(text: str) -> str:
     if not events:
         return f"No event matching '{query}' on {target.strftime('%b %-d')}."
 
-    # Narrow down if multiple results
     if len(events) > 1 and query:
         narrow = [e for e in events if query.lower() in e["summary"].lower()]
         if narrow:
@@ -420,6 +497,17 @@ def handle_delete(text: str) -> str:
     event = events[0]
     calendar_client.delete_event(event["id"])
     return f"Deleted *{event['summary']}* on {target.strftime('%a %b %-d')}."
+
+
+def handle_delete(text: str) -> str:
+    if not text:
+        return "Usage: /delete <title>, <date>\nExample: /delete dentist, May 15"
+
+    entries = [e.strip() for e in text.split(" : ")]
+    if len(entries) == 1:
+        return _delete_one(text)
+
+    return "\n".join(_delete_one(entry) for entry in entries)
 
 
 # ─── /edit ────────────────────────────────────────────────────────────────────

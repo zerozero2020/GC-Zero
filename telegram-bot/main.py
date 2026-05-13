@@ -1,8 +1,11 @@
 import asyncio
 import logging
 import os
+from contextlib import asynccontextmanager
 
 import httpx
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
+from apscheduler.triggers.cron import CronTrigger
 from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 
@@ -16,9 +19,37 @@ logger = logging.getLogger(__name__)
 TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_API = f"https://api.telegram.org/bot{TOKEN}"
 
-app = FastAPI()
-
 _pending: dict[int, commands.PendingEvent] = {}
+_owner_chat_id: int | None = int(os.environ["OWNER_CHAT_ID"]) if os.environ.get("OWNER_CHAT_ID") else None
+
+
+async def _send_weekly_summary() -> None:
+    global _owner_chat_id
+    if not _owner_chat_id:
+        logger.warning("No OWNER_CHAT_ID set — skipping weekly summary notification")
+        return
+    try:
+        text = commands.handle_weekly_preview()
+        await _send(_owner_chat_id, text)
+        logger.info("Sent weekly summary to chat_id=%s", _owner_chat_id)
+    except Exception:
+        logger.exception("Error sending weekly summary")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    scheduler = AsyncIOScheduler(timezone="America/New_York")
+    scheduler.add_job(
+        _send_weekly_summary,
+        CronTrigger(day_of_week="sun", hour=20, minute=0, timezone="America/New_York"),
+    )
+    scheduler.start()
+    logger.info("Scheduler started — weekly summary every Sunday 8:00 PM ET")
+    yield
+    scheduler.shutdown()
+
+
+app = FastAPI(lifespan=lifespan)
 
 
 async def _send(chat_id: int, text: str) -> None:
@@ -42,6 +73,8 @@ def _route(text: str) -> str:
         return commands.handle_delete(args)
     if cmd == "/edit":
         return commands.handle_edit(args)
+    if cmd == "/summary":
+        return commands.handle_summary()
     if cmd == "/week":
         return commands.handle_week()
     if cmd == "/today":
@@ -58,8 +91,13 @@ async def _handle(data: dict) -> None:
     if not message:
         return
 
+    global _owner_chat_id
     chat_id: int = message["chat"]["id"]
     text: str = message.get("text", "").strip()
+
+    if _owner_chat_id is None:
+        _owner_chat_id = chat_id
+        logger.info("Owner chat_id set to %s", chat_id)
 
     logger.info("Incoming from chat_id=%s: %r", chat_id, text)
 

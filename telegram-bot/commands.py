@@ -233,10 +233,20 @@ def _lookup_address(company: str) -> str | None:
     return None
 
 
+_DATE_RANGE_RE = re.compile(
+    r"\d{1,2}(?:st|nd|rd|th)?\s*[-–]\s*(?:\w+\s+)?\d{1,2}(?:st|nd|rd|th)?",
+    re.IGNORECASE,
+)
+
+
+def _has_date_range(text: str) -> bool:
+    return bool(_DATE_RANGE_RE.search(text))
+
+
 def _parse_end_of_range(text: str, start: date) -> date:
-    """Return the exclusive end date for a range like 'April 11-13' or 'May 29 to June 1'."""
+    """Return the exclusive end date for a range like 'April 11-13', 'Aug 6th - Aug 9th', or 'May 29 to June 1'."""
     m = re.search(
-        r"(\w+)\s+(\d{1,2})\s*[-–to]+\s*(?:(\w+)\s+)?(\d{1,2})",
+        r"(\w+)\s+(\d{1,2})(?:st|nd|rd|th)?\s*[-–to]+\s*(?:(\w+)\s+)?(\d{1,2})(?:st|nd|rd|th)?",
         text, re.IGNORECASE,
     )
     if m:
@@ -342,7 +352,7 @@ def _add_one(title: str, date_text: str) -> str | PendingEvent:
 
     # Trip or no time → all-day
     if color_id == "7" or not _has_time(date_str):
-        end_date = _parse_end_of_range(date_text, target_date) if color_id == "7" else target_date + timedelta(days=1)
+        end_date = _parse_end_of_range(date_text, target_date) if (color_id == "7" or _has_date_range(date_text)) else target_date + timedelta(days=1)
         if color_id is None:
             return PendingEvent(
                 summary=title,
@@ -485,10 +495,15 @@ def _delete_one(entry: str) -> str:
 
     target = parsed_dt.date()
     day_start = datetime(target.year, target.month, target.day, tzinfo=EASTERN)
+    if _has_date_range(date_text):
+        end_date = _parse_end_of_range(date_text, target)
+        day_end = datetime(end_date.year, end_date.month, end_date.day, tzinfo=EASTERN)
+    else:
+        day_end = day_start + timedelta(days=1)
 
     events = calendar_client.list_events(
         time_min=day_start.isoformat(),
-        time_max=(day_start + timedelta(days=1)).isoformat(),
+        time_max=day_end.isoformat(),
         query=query or None,
     )
 

@@ -36,10 +36,11 @@ def list_events(
     time_min: Optional[str] = None,
     time_max: Optional[str] = None,
     query: Optional[str] = None,
+    calendar_id: str = "primary",
 ) -> list:
     service = _get_service()
     params: dict = {
-        "calendarId": "primary",
+        "calendarId": calendar_id,
         "singleEvents": True,
         "orderBy": "startTime",
         "maxResults": 20,
@@ -55,6 +56,7 @@ def list_events(
     return [
         {
             "id": e["id"],
+            "calendar_id": calendar_id,
             "summary": e.get("summary", "(no title)"),
             "start": e["start"].get("dateTime") or e["start"].get("date"),
             "end": e["end"].get("dateTime") or e["end"].get("date"),
@@ -68,11 +70,12 @@ def list_events(
     ]
 
 
-def get_event(event_id: str) -> dict:
+def get_event(event_id: str, calendar_id: str = "primary") -> dict:
     service = _get_service()
-    e = service.events().get(calendarId="primary", eventId=event_id).execute()
+    e = service.events().get(calendarId=calendar_id, eventId=event_id).execute()
     return {
         "id": e["id"],
+        "calendar_id": calendar_id,
         "summary": e.get("summary", "(no title)"),
         "start": e["start"].get("dateTime") or e["start"].get("date"),
         "end": e["end"].get("dateTime") or e["end"].get("date"),
@@ -92,6 +95,7 @@ def create_event(
     location: Optional[str] = None,
     description: Optional[str] = None,
     recurrence: Optional[list] = None,
+    calendar_id: str = "primary",
 ) -> dict:
     service = _get_service()
     body: dict = {
@@ -108,7 +112,7 @@ def create_event(
     if recurrence:
         body["recurrence"] = recurrence
 
-    result = service.events().insert(calendarId="primary", body=body).execute()
+    result = service.events().insert(calendarId=calendar_id, body=body).execute()
     return {"id": result["id"], "summary": result.get("summary"), "htmlLink": result.get("htmlLink")}
 
 
@@ -120,6 +124,7 @@ def update_event(
     color_id: Optional[str] = None,
     location: Optional[str] = None,
     description: Optional[str] = None,
+    calendar_id: str = "primary",
 ) -> dict:
     service = _get_service()
     body: dict = {}
@@ -136,11 +141,11 @@ def update_event(
     if description is not None:
         body["description"] = description
 
-    result = service.events().patch(calendarId="primary", eventId=event_id, body=body).execute()
+    result = service.events().patch(calendarId=calendar_id, eventId=event_id, body=body).execute()
     return {"id": result["id"], "summary": result.get("summary")}
 
 
-def delete_event(event_id: str) -> dict:
+def delete_event(event_id: str, calendar_id: str = "primary") -> dict:
     service = _get_service()
-    service.events().delete(calendarId="primary", eventId=event_id).execute()
+    service.events().delete(calendarId=calendar_id, eventId=event_id).execute()
     return {"deleted": True, "event_id": event_id}

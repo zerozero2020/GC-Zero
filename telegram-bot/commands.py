@@ -26,6 +26,8 @@ import calendar_client
 
 EASTERN = ZoneInfo("America/New_York")
 AVDG_RECURRING_ID = "9vs14op0jp88pfl3p2aabrc3o0"
+PC_CALENDAR_ID = "8e9431e308160f2a923f3d87d18435553a2d2d461fc67fa05fa5599179f987bb@group.calendar.google.com"
+_ALL_CALENDARS = ["primary", PC_CALENDAR_ID]
 ADDRESS_BOOK_PATH = os.environ.get("ADDRESS_BOOK_PATH", "../company-addresses.md")
 
 _DS = {
@@ -70,6 +72,7 @@ class PendingEvent:
     start_time: str
     end_time: str
     recurrence: list = field(default_factory=list)
+    calendar_id: str = "primary"
 
     @property
     def prompt(self) -> str:
@@ -89,6 +92,7 @@ def complete_pending(pending: PendingEvent, color_id: str) -> str:
         "start_time": pending.start_time,
         "end_time": pending.end_time,
         "color_id": color_id,
+        "calendar_id": pending.calendar_id,
     }
     if pending.recurrence:
         kwargs["recurrence"] = pending.recurrence
@@ -112,6 +116,7 @@ HELP_TEXT = """\
   /add Coachella trip, April 11-13
   /add Mom's Birthday, March 15
   _Batch:_ /add Dentist, May 15 2pm : Gym, May 16 7am
+  _Project Cook:_ /add [pc] Meeting, June 3 2pm
 
 `/avdg <site> <day>`
   /avdg Hines Monday
@@ -122,14 +127,16 @@ HELP_TEXT = """\
   /edit dentist, May 15 > 3pm
   /edit lunch Rosie, May 17 > move to 1pm
   /edit dentist, May 15 > location 123 Main St
+  _Project Cook:_ /edit [pc] meeting, June 3 > 3pm
 
 `/delete <title>, <date>`
   /delete dentist, May 15
   _Batch:_ /delete dentist, May 15 : gym, May 16
+  _Project Cook:_ /delete [pc] meeting, June 3
 
-`/summary` — this week's events with details
-`/week`    — next 7 days
-`/today`   — today's events
+`/summary` — this week's events with details (all calendars)
+`/week`    — next 7 days (all calendars)
+`/today`   — today's events (all calendars)
 
 `/suggestions <note>`
   /suggestions add reminder support to events
@@ -137,6 +144,30 @@ HELP_TEXT = """\
 
 
 # ─── helpers ──────────────────────────────────────────────────────────────────
+
+def _parse_calendar_prefix(text: str) -> tuple[str, str]:
+    """Strip [pc] prefix and return (calendar_id, cleaned_text)."""
+    m = re.match(r'^\[pc\]\s*', text, re.IGNORECASE)
+    if m:
+        return PC_CALENDAR_ID, text[m.end():]
+    return "primary", text
+
+
+def _list_all_events(time_min=None, time_max=None, query=None) -> list:
+    """Fetch and merge events from all calendars, sorted by start time."""
+    events = []
+    for cal_id in _ALL_CALENDARS:
+        events.extend(calendar_client.list_events(time_min=time_min, time_max=time_max, query=query, calendar_id=cal_id))
+
+    def _sort_key(e):
+        start = e["start"]
+        if "T" in start:
+            return datetime.fromisoformat(start).astimezone(EASTERN)
+        d = date.fromisoformat(start)
+        return datetime(d.year, d.month, d.day, tzinfo=EASTERN)
+
+    return sorted(events, key=_sort_key)
+
 
 def _has_name(title: str) -> bool:
     words = title.split()
@@ -263,7 +294,7 @@ def _parse_end_of_range(text: str, start: date) -> date:
 def handle_today() -> str:
     now = datetime.now(EASTERN)
     start = now.replace(hour=0, minute=0, second=0, microsecond=0)
-    events = calendar_client.list_events(
+    events = _list_all_events(
         time_min=start.isoformat(),
         time_max=(start + timedelta(days=1)).isoformat(),
     )
@@ -274,7 +305,7 @@ def handle_today() -> str:
 
 def handle_week() -> str:
     now = datetime.now(EASTERN)
-    events = calendar_client.list_events(
+    events = _list_all_events(
         time_min=now.isoformat(),
         time_max=(now + timedelta(days=7)).isoformat(),
     )
@@ -293,7 +324,7 @@ def _week_end_dt(from_dt: datetime) -> datetime:
 def handle_summary() -> str:
     now = datetime.now(EASTERN)
     week_end = _week_end_dt(now)
-    events = calendar_client.list_events(
+    events = _list_all_events(
         time_min=now.isoformat(),
         time_max=week_end.isoformat(),
     )
@@ -306,7 +337,7 @@ def handle_weekly_preview() -> str:
     now = datetime.now(EASTERN)
     next_monday = _week_end_dt(now)
     next_next_monday = next_monday + timedelta(days=7)
-    events = calendar_client.list_events(
+    events = _list_all_events(
         time_min=next_monday.isoformat(),
         time_max=next_next_monday.isoformat(),
     )
@@ -317,7 +348,7 @@ def handle_weekly_preview() -> str:
 
 # ─── /add ─────────────────────────────────────────────────────────────────────
 
-def _add_one(title: str, date_text: str) -> str | PendingEvent:
+def _add_one(title: str, date_text: str, calendar_id: str = "primary") -> str | PendingEvent:
     """Add a single event. Returns a confirmation string or PendingEvent if color is unknown."""
     found = search_dates(date_text, settings=_DS, languages=["en"]) if date_text else None
 
@@ -329,6 +360,7 @@ def _add_one(title: str, date_text: str) -> str | PendingEvent:
             start_time=today.isoformat(),
             end_time=(today + timedelta(days=1)).isoformat(),
             color_id=_infer_color(title) or DEFAULT_COLOR,
+            calendar_id=calendar_id,
         )
         return f"Added *{result['summary']}* — today, all day (no date given)."
 
@@ -347,6 +379,7 @@ def _add_one(title: str, date_text: str) -> str | PendingEvent:
             end_time=(target_date + timedelta(days=1)).isoformat(),
             color_id="5",
             recurrence=["RRULE:FREQ=YEARLY"],
+            calendar_id=calendar_id,
         )
         return f"Added *{result['summary']}* — {target_date.strftime('%b %-d')}, yearly (Birthday)."
 
@@ -358,12 +391,14 @@ def _add_one(title: str, date_text: str) -> str | PendingEvent:
                 summary=title,
                 start_time=target_date.isoformat(),
                 end_time=end_date.isoformat(),
+                calendar_id=calendar_id,
             )
         result = calendar_client.create_event(
             summary=title,
             start_time=target_date.isoformat(),
             end_time=end_date.isoformat(),
             color_id=color_id,
+            calendar_id=calendar_id,
         )
         if end_date == target_date + timedelta(days=1):
             d_disp = target_date.strftime("%a %b %-d")
@@ -381,12 +416,14 @@ def _add_one(title: str, date_text: str) -> str | PendingEvent:
             summary=title,
             start_time=parsed_dt.strftime(f"%Y-%m-%dT%H:%M:%S{offset}"),
             end_time=end_dt.strftime(f"%Y-%m-%dT%H:%M:%S{offset}"),
+            calendar_id=calendar_id,
         )
     result = calendar_client.create_event(
         summary=title,
         start_time=parsed_dt.strftime(f"%Y-%m-%dT%H:%M:%S{offset}"),
         end_time=end_dt.strftime(f"%Y-%m-%dT%H:%M:%S{offset}"),
         color_id=color_id,
+        calendar_id=calendar_id,
     )
     t_disp = f"{parsed_dt.strftime('%-I:%M %p')}–{end_dt.strftime('%-I:%M %p')}"
     return f"Added *{result['summary']}* — {target_date.strftime('%a %b %-d')}, {t_disp} ({COLOR_NAMES.get(color_id, 'Event')})."
@@ -396,6 +433,7 @@ def handle_add(text: str) -> str | PendingEvent:
     if not text:
         return "Usage: /add <title>, <date/time>\nExample: /add Lunch with Rosie, May 17 noon"
 
+    calendar_id, text = _parse_calendar_prefix(text)
     entries = [e.strip() for e in text.split(" : ")]
 
     if len(entries) == 1:
@@ -403,7 +441,7 @@ def handle_add(text: str) -> str | PendingEvent:
         if "," not in text:
             return "Separate the title and date with a comma.\nExample: /add Dentist, tomorrow 2pm"
         title, date_text = text.split(",", 1)
-        return _add_one(title.strip() or "Event", date_text.strip())
+        return _add_one(title.strip() or "Event", date_text.strip(), calendar_id=calendar_id)
 
     # Batch — use default color for unknowns, no interactive asking
     results = []
@@ -412,13 +450,14 @@ def handle_add(text: str) -> str | PendingEvent:
             results.append(f"⚠️ Skipped '{entry}' — missing comma between title and date.")
             continue
         title, date_text = entry.split(",", 1)
-        outcome = _add_one(title.strip() or "Event", date_text.strip())
+        outcome = _add_one(title.strip() or "Event", date_text.strip(), calendar_id=calendar_id)
         if isinstance(outcome, PendingEvent):
             r = calendar_client.create_event(
                 summary=outcome.summary,
                 start_time=outcome.start_time,
                 end_time=outcome.end_time,
                 color_id=DEFAULT_COLOR,
+                calendar_id=calendar_id,
                 **({"recurrence": outcome.recurrence} if outcome.recurrence else {}),
             )
             results.append(f"Added *{r['summary']}* (category unclear — used default color).")
@@ -481,7 +520,7 @@ def handle_avdg(text: str) -> str:
 
 # ─── /delete ──────────────────────────────────────────────────────────────────
 
-def _delete_one(entry: str) -> str:
+def _delete_one(entry: str, calendar_id: str = "primary") -> str:
     if "," not in entry:
         return f"⚠️ Skipped '{entry}' — missing comma between title and date."
 
@@ -505,6 +544,7 @@ def _delete_one(entry: str) -> str:
         time_min=day_start.isoformat(),
         time_max=day_end.isoformat(),
         query=query or None,
+        calendar_id=calendar_id,
     )
 
     if not events:
@@ -521,7 +561,7 @@ def _delete_one(entry: str) -> str:
         return "\n".join(lines)
 
     event = events[0]
-    calendar_client.delete_event(event["id"])
+    calendar_client.delete_event(event["id"], calendar_id=calendar_id)
     return f"Deleted *{event['summary']}* on {target.strftime('%a %b %-d')}."
 
 
@@ -529,11 +569,12 @@ def handle_delete(text: str) -> str:
     if not text:
         return "Usage: /delete <title>, <date>\nExample: /delete dentist, May 15"
 
+    calendar_id, text = _parse_calendar_prefix(text)
     entries = [e.strip() for e in text.split(" : ")]
     if len(entries) == 1:
-        return _delete_one(text)
+        return _delete_one(text, calendar_id=calendar_id)
 
-    return "\n".join(_delete_one(entry) for entry in entries)
+    return "\n".join(_delete_one(entry, calendar_id=calendar_id) for entry in entries)
 
 
 # ─── /edit ────────────────────────────────────────────────────────────────────
@@ -549,6 +590,7 @@ def handle_edit(text: str) -> str:
             "  /edit dentist, May 15 > title New Name"
         )
 
+    calendar_id, text = _parse_calendar_prefix(text)
     search_part, change_part = text.split(">", 1)
     search_part, change_part = search_part.strip(), change_part.strip()
 
@@ -570,6 +612,7 @@ def handle_edit(text: str) -> str:
         time_min=day_start.isoformat(),
         time_max=(day_start + timedelta(days=1)).isoformat(),
         query=query or None,
+        calendar_id=calendar_id,
     )
     if not events:
         return f"No event matching '{query}' on {target.strftime('%b %-d')}."
@@ -590,18 +633,18 @@ def handle_edit(text: str) -> str:
 
     if change_lower.startswith("location "):
         loc = change_part.split(None, 1)[1]
-        calendar_client.update_event(event_id=event_id, location=loc)
+        calendar_client.update_event(event_id=event_id, location=loc, calendar_id=calendar_id)
         return f"Updated *{event['summary']}* — location set to {loc}."
 
     if change_lower.startswith("title ") or change_lower.startswith("rename "):
         new_title = change_part.split(None, 1)[1]
-        calendar_client.update_event(event_id=event_id, summary=new_title)
+        calendar_client.update_event(event_id=event_id, summary=new_title, calendar_id=calendar_id)
         return f"Renamed to *{new_title}*."
 
     # New time — parse it and keep the same date + duration
     new_time = dateparser.parse(change_part, settings=_DS)
     if new_time:
-        current = calendar_client.get_event(event_id)
+        current = calendar_client.get_event(event_id, calendar_id=calendar_id)
         curr_start = datetime.fromisoformat(current["start"])
         curr_end = datetime.fromisoformat(current["end"])
         duration = curr_end - curr_start
@@ -613,6 +656,7 @@ def handle_edit(text: str) -> str:
             event_id=event_id,
             start_time=new_start.strftime(f"%Y-%m-%dT%H:%M:%S{offset}"),
             end_time=new_end.strftime(f"%Y-%m-%dT%H:%M:%S{offset}"),
+            calendar_id=calendar_id,
         )
         t_disp = f"{new_start.strftime('%-I:%M %p')}–{new_end.strftime('%-I:%M %p')}"
         return f"Updated *{event['summary']}* → {t_disp} on {target.strftime('%a %b %-d')}."

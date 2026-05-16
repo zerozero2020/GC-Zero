@@ -15,7 +15,8 @@ from datetime import datetime
 from zoneinfo import ZoneInfo
 
 EASTERN = ZoneInfo("America/New_York")
-DB_PATH = os.path.join(os.path.dirname(__file__), "tasks.db")
+_DATA_DIR = os.environ.get("DATA_DIR", os.path.dirname(__file__))
+DB_PATH = os.path.join(_DATA_DIR, "tasks.db")
 
 
 def _init_db() -> None:

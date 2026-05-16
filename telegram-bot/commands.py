@@ -331,7 +331,7 @@ def _lookup_address(company: str) -> str | None:
 
 
 _DATE_RANGE_RE = re.compile(
-    r"\d{1,2}(?:st|nd|rd|th)?\s*[-–]\s*(?:\w+\s+)?\d{1,2}(?:st|nd|rd|th)?(?!\s*(?:am|pm))",
+    r"\d{1,2}(?:st|nd|rd|th)?\s*[-–]\s*(?:\w+\s+)?\d{1,2}(?:st|nd|rd|th)?\b(?!\s*(?:am|pm))",
     re.IGNORECASE,
 )
 
@@ -447,10 +447,15 @@ def handle_weekly_preview() -> str:
 def _add_one(title: str, date_text: str, calendar_id: str = "primary") -> str | PendingEvent:
     """Add a single event. Returns a confirmation string or PendingEvent if color is unknown."""
     reminder_minutes, date_text = _parse_reminder(date_text)
-    found = search_dates(date_text, settings=_DS, languages=["en"]) if date_text else None
+    parsed_dt = dateparser.parse(date_text, settings=_DS) if date_text else None
+    # Fallback for date ranges (e.g. "Aug 6th - Aug 9th") that dateparser.parse can't handle
+    if not parsed_dt and date_text:
+        found = search_dates(date_text, settings=_DS, languages=["en"])
+        if found:
+            parsed_dt = found[0][1]
 
     # No date detected → all-day TBD today using default color
-    if not found:
+    if not parsed_dt:
         today = date.today()
         result = calendar_client.create_event(
             summary=title + " (Time TBD)",
@@ -462,7 +467,6 @@ def _add_one(title: str, date_text: str, calendar_id: str = "primary") -> str | 
         )
         return f"Added *{result['summary']}* — today, all day (no date given)."
 
-    date_str, parsed_dt = found[0]
     color_id = _infer_color(title)
     target_date = parsed_dt.date()
 
@@ -483,7 +487,7 @@ def _add_one(title: str, date_text: str, calendar_id: str = "primary") -> str | 
         return f"Added *{result['summary']}* — {target_date.strftime('%b %-d')}, yearly (Birthday)."
 
     # Trip or no time → all-day
-    if color_id == "7" or not _has_time(date_str):
+    if color_id == "7" or not _has_time(date_text):
         end_date = _parse_end_of_range(date_text, target_date) if (color_id == "7" or _has_date_range(date_text)) else target_date + timedelta(days=1)
         if color_id is None:
             return PendingEvent(

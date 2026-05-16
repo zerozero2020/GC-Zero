@@ -1,7 +1,7 @@
 # Calendar Bot — Functionality Reference
 
 A personal Telegram bot that manages Google Calendar via natural-language commands.
-Hosted on Heroku, built with FastAPI + Python.
+Hosted on Railway, built with FastAPI + Python.
 
 ---
 
@@ -76,7 +76,7 @@ Edits an existing event. Finds the event by title + date, then applies the chang
 /edit dentist, May 15 > category friends
 /edit dentist, May 15 > category 1
 ```
-Valid: `friends`, `trip`, `appt`, `birthday`, `avdg`, `christine`, `none` (or numbers 1–7).
+Valid categories: `friends`, `trip`, `appt`, `birthday`, `avdg`, `christine`, `none` (or numbers 1–7).
 
 **Location:**
 ```

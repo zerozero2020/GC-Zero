@@ -176,6 +176,24 @@ across all calendars.
 
 ---
 
+### `/note <text>` and `/notes`
+
+Quick capture for anything you want to remember. Notes are stored with a
+timestamp and listed newest-first.
+
+```
+/note Call mom back
+/note Pick up gift for Alex
+/note Remember to ask Shane about the meeting
+/notes                 ← lists all notes with dates
+/note delete 2         ← deletes note #2 from the list
+```
+
+> **Railway note:** `notes.db` lives on the container filesystem. Set up a
+> persistent volume (same one as `tasks.db`) to survive redeploys.
+
+---
+
 ### `/task`
 
 Personal task list backed by SQLite. Numbers are positional in the open list.

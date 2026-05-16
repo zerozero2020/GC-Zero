@@ -149,6 +149,12 @@ HELP_TEXT = """\
 `/summary`       — this week's events with details (all calendars)
 `/week`          — next 7 days (all calendars)
 
+`/note <text>`
+  /note Call mom back
+  /note Pick up gift for Alex
+  /note delete 2
+`/notes` — list all notes
+
 `/task`
   /task add Call dentist
   /task add Pick up groceries

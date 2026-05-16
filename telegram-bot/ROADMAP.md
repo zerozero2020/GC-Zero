@@ -15,7 +15,7 @@ for managing multiple areas of life, starting with Google Calendar.
 ## In progress / next up
 
 - [x] **Task list** — `/task add`, `/task done`, `/task delete`, `/task clear`
-- [ ] **Quick notes** — `/note <text>` for fast capture from phone
+- [x] **Quick notes** — `/note <text>`, `/notes`, `/note delete <#>`
 - [ ] **Gmail integration** — summarize emails, create events from threads
 
 ---
@@ -41,5 +41,6 @@ for managing multiple areas of life, starting with Google Calendar.
 - [x] Project Cook calendar with `[pc]` prefix routing
 - [x] Multi-user access control (owner + collaborators via `PC_COLLABORATOR_IDS`)
 - [x] Task list (`/task add`, `/task done`, `/task delete`, `/task clear`)
+- [x] Quick notes (`/note`, `/notes`, `/note delete`)
 - [x] Daily 7am morning briefing
 - [x] Sunday 8pm weekly preview notification

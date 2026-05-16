@@ -10,6 +10,7 @@ from dotenv import load_dotenv
 from fastapi import FastAPI, HTTPException, Request
 
 import commands
+import notes
 import tasks
 
 load_dotenv()
@@ -123,6 +124,10 @@ def _route(text: str) -> str:
         return commands.handle_on(args)
     if cmd in ("/help", "/start"):
         return commands.HELP_TEXT
+    if cmd == "/note":
+        return notes.handle_note(args)
+    if cmd == "/notes":
+        return notes.handle_notes()
     if cmd == "/task":
         return tasks.handle_task(args)
     if cmd == "/suggestions":

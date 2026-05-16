@@ -176,6 +176,25 @@ across all calendars.
 
 ---
 
+### `/task`
+
+Personal task list backed by SQLite. Numbers are positional in the open list.
+
+```
+/task                   ← same as /task list
+/task list
+/task add Call dentist
+/task done 1
+/task delete 2
+/task clear             ← removes all completed tasks
+```
+
+> **Railway note:** `tasks.db` lives on the container filesystem. Set up a
+> Railway persistent volume mounted at the `telegram-bot/` directory to survive
+> redeploys. Without it, tasks reset on each deploy.
+
+---
+
 ### `/suggestions <note>`
 
 Saves a note to `suggestions.md` in the bot directory with a timestamp.

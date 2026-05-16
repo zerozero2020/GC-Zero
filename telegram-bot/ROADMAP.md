@@ -16,7 +16,7 @@ for managing multiple areas of life, starting with Google Calendar.
 
 - [x] **Task list** — `/task add`, `/task done`, `/task delete`, `/task clear`
 - [x] **Quick notes** — `/note <text>`, `/notes`, `/note delete <#>`
-- [ ] **Gmail integration** — summarize emails, create events from threads
+- [ ] **Gmail integration** — summarize emails, create events from threads *(on hold — revisit once Gmail is organized)*
 
 ---
 

@@ -28,7 +28,7 @@ EASTERN = ZoneInfo("America/New_York")
 AVDG_RECURRING_ID = "9vs14op0jp88pfl3p2aabrc3o0"
 PC_CALENDAR_ID = "8e9431e308160f2a923f3d87d18435553a2d2d461fc67fa05fa5599179f987bb@group.calendar.google.com"
 _ALL_CALENDARS = ["primary", PC_CALENDAR_ID]
-ADDRESS_BOOK_PATH = os.environ.get("ADDRESS_BOOK_PATH", "../company-addresses.md")
+ADDRESS_BOOK_PATH = os.environ.get("ADDRESS_BOOK_PATH", "company-addresses.md")
 
 _DS = {
     "PREFER_DATES_FROM": "future",

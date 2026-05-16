@@ -96,6 +96,7 @@ def create_event(
     description: Optional[str] = None,
     recurrence: Optional[list] = None,
     calendar_id: str = "primary",
+    reminder_minutes: Optional[int] = None,
 ) -> dict:
     service = _get_service()
     body: dict = {
@@ -111,6 +112,11 @@ def create_event(
         body["description"] = description
     if recurrence:
         body["recurrence"] = recurrence
+    if reminder_minutes is not None:
+        body["reminders"] = {
+            "useDefault": False,
+            "overrides": [{"method": "popup", "minutes": reminder_minutes}],
+        }
 
     result = service.events().insert(calendarId=calendar_id, body=body).execute()
     return {"id": result["id"], "summary": result.get("summary"), "htmlLink": result.get("htmlLink")}

@@ -73,6 +73,7 @@ class PendingEvent:
     end_time: str
     recurrence: list = field(default_factory=list)
     calendar_id: str = "primary"
+    reminder_minutes: int | None = None
 
     @property
     def prompt(self) -> str:
@@ -96,6 +97,8 @@ def complete_pending(pending: PendingEvent, color_id: str) -> str:
     }
     if pending.recurrence:
         kwargs["recurrence"] = pending.recurrence
+    if pending.reminder_minutes is not None:
+        kwargs["reminder_minutes"] = pending.reminder_minutes
     result = calendar_client.create_event(**kwargs)
     start = result["start"]
     if "T" in start:
@@ -105,14 +108,16 @@ def complete_pending(pending: PendingEvent, color_id: str) -> str:
         d = date.fromisoformat(start)
         disp = f"{d.strftime('%a %b %-d')} (all day)"
     category = COLOR_NAMES.get(color_id, "Event")
-    return f"Added *{result['summary']}* — {disp} ({category})."
+    reminder_suffix = f" Reminder: {_fmt_reminder(pending.reminder_minutes)}." if pending.reminder_minutes else ""
+    return f"Added *{result['summary']}* — {disp} ({category}).{reminder_suffix}"
 
 HELP_TEXT = """\
 *Calendar Bot Commands*
 
-`/add <title>, <date/time>`
+`/add <title>, <date/time> [remind X]`
   /add Lunch with Rosie, May 17 noon
-  /add Dentist, tomorrow 2pm
+  /add Dentist, tomorrow 2pm remind 30
+  /add Doctor, June 1 9am remind 1h
   /add Coachella trip, April 11-13
   /add Mom's Birthday, March 15
   _Batch:_ /add Dentist, May 15 2pm : Gym, May 16 7am
@@ -125,8 +130,10 @@ HELP_TEXT = """\
 
 `/edit <title>, <date> > <change>`
   /edit dentist, May 15 > 3pm
-  /edit lunch Rosie, May 17 > move to 1pm
-  /edit dentist, May 15 > location 123 Main St
+  /edit dentist, May 15 > May 20
+  /edit dentist, May 15 > May 20 3pm
+  /edit lunch Rosie, May 17 > location 123 Main St
+  /edit lunch Rosie, May 17 > title Dinner with Rosie
   _Project Cook:_ /edit [pc] meeting, June 3 > 3pm
 
 `/delete <title>, <date>`
@@ -167,6 +174,49 @@ def _list_all_events(time_min=None, time_max=None, query=None) -> list:
         return datetime(d.year, d.month, d.day, tzinfo=EASTERN)
 
     return sorted(events, key=_sort_key)
+
+
+_REMIND_RE = re.compile(
+    r'\s*\bremind\s+(\d+)\s*(d(?:ay)?s?|h(?:our)?s?|m(?:in(?:ute)?s?)?)?\b\s*',
+    re.IGNORECASE,
+)
+_DATE_WORD_RE = re.compile(
+    r'\b(jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|'
+    r'jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?|'
+    r'monday|tuesday|wednesday|thursday|friday|saturday|sunday|tomorrow|next\s+\w+)\b',
+    re.IGNORECASE,
+)
+
+
+def _parse_reminder(text: str) -> tuple[int | None, str]:
+    """Extract 'remind X[m/h/d]' from text. Returns (minutes, cleaned_text)."""
+    m = _REMIND_RE.search(text)
+    if not m:
+        return None, text
+    value = int(m.group(1))
+    unit = (m.group(2) or "m").lower()
+    if unit.startswith("d"):
+        minutes = value * 1440
+    elif unit.startswith("h"):
+        minutes = value * 60
+    else:
+        minutes = value
+    cleaned = (text[:m.start()] + text[m.end():]).strip()
+    return minutes, cleaned
+
+
+def _fmt_reminder(minutes: int) -> str:
+    if minutes >= 1440 and minutes % 1440 == 0:
+        d = minutes // 1440
+        return f"{d} day{'s' if d > 1 else ''} before"
+    if minutes >= 60 and minutes % 60 == 0:
+        h = minutes // 60
+        return f"{h} hour{'s' if h > 1 else ''} before"
+    return f"{minutes} min before"
+
+
+def _has_date_word(text: str) -> bool:
+    return bool(_DATE_WORD_RE.search(text))
 
 
 def _has_name(title: str) -> bool:
@@ -350,6 +400,7 @@ def handle_weekly_preview() -> str:
 
 def _add_one(title: str, date_text: str, calendar_id: str = "primary") -> str | PendingEvent:
     """Add a single event. Returns a confirmation string or PendingEvent if color is unknown."""
+    reminder_minutes, date_text = _parse_reminder(date_text)
     found = search_dates(date_text, settings=_DS, languages=["en"]) if date_text else None
 
     # No date detected → all-day TBD today using default color
@@ -361,6 +412,7 @@ def _add_one(title: str, date_text: str, calendar_id: str = "primary") -> str | 
             end_time=(today + timedelta(days=1)).isoformat(),
             color_id=_infer_color(title) or DEFAULT_COLOR,
             calendar_id=calendar_id,
+            reminder_minutes=reminder_minutes,
         )
         return f"Added *{result['summary']}* — today, all day (no date given)."
 
@@ -380,6 +432,7 @@ def _add_one(title: str, date_text: str, calendar_id: str = "primary") -> str | 
             color_id="5",
             recurrence=["RRULE:FREQ=YEARLY"],
             calendar_id=calendar_id,
+            reminder_minutes=reminder_minutes,
         )
         return f"Added *{result['summary']}* — {target_date.strftime('%b %-d')}, yearly (Birthday)."
 
@@ -392,6 +445,7 @@ def _add_one(title: str, date_text: str, calendar_id: str = "primary") -> str | 
                 start_time=target_date.isoformat(),
                 end_time=end_date.isoformat(),
                 calendar_id=calendar_id,
+                reminder_minutes=reminder_minutes,
             )
         result = calendar_client.create_event(
             summary=title,
@@ -399,13 +453,15 @@ def _add_one(title: str, date_text: str, calendar_id: str = "primary") -> str | 
             end_time=end_date.isoformat(),
             color_id=color_id,
             calendar_id=calendar_id,
+            reminder_minutes=reminder_minutes,
         )
         if end_date == target_date + timedelta(days=1):
             d_disp = target_date.strftime("%a %b %-d")
         else:
             d_disp = f"{target_date.strftime('%b %-d')}–{(end_date - timedelta(days=1)).strftime('%b %-d')}"
         suffix = " (Time TBD)" if color_id != "7" else ""
-        return f"Added *{result['summary']}* — {d_disp}{suffix} ({COLOR_NAMES.get(color_id, 'Event')})."
+        reminder_suffix = f" Reminder: {_fmt_reminder(reminder_minutes)}." if reminder_minutes else ""
+        return f"Added *{result['summary']}* — {d_disp}{suffix} ({COLOR_NAMES.get(color_id, 'Event')}).{reminder_suffix}"
 
     # Timed event
     duration = _infer_duration(title)
@@ -417,6 +473,7 @@ def _add_one(title: str, date_text: str, calendar_id: str = "primary") -> str | 
             start_time=parsed_dt.strftime(f"%Y-%m-%dT%H:%M:%S{offset}"),
             end_time=end_dt.strftime(f"%Y-%m-%dT%H:%M:%S{offset}"),
             calendar_id=calendar_id,
+            reminder_minutes=reminder_minutes,
         )
     result = calendar_client.create_event(
         summary=title,
@@ -424,9 +481,11 @@ def _add_one(title: str, date_text: str, calendar_id: str = "primary") -> str | 
         end_time=end_dt.strftime(f"%Y-%m-%dT%H:%M:%S{offset}"),
         color_id=color_id,
         calendar_id=calendar_id,
+        reminder_minutes=reminder_minutes,
     )
     t_disp = f"{parsed_dt.strftime('%-I:%M %p')}–{end_dt.strftime('%-I:%M %p')}"
-    return f"Added *{result['summary']}* — {target_date.strftime('%a %b %-d')}, {t_disp} ({COLOR_NAMES.get(color_id, 'Event')})."
+    reminder_suffix = f" Reminder: {_fmt_reminder(reminder_minutes)}." if reminder_minutes else ""
+    return f"Added *{result['summary']}* — {target_date.strftime('%a %b %-d')}, {t_disp} ({COLOR_NAMES.get(color_id, 'Event')}).{reminder_suffix}"
 
 
 def handle_add(text: str) -> str | PendingEvent:
@@ -641,15 +700,44 @@ def handle_edit(text: str) -> str:
         calendar_client.update_event(event_id=event_id, summary=new_title, calendar_id=calendar_id)
         return f"Renamed to *{new_title}*."
 
-    # New time — parse it and keep the same date + duration
-    new_time = dateparser.parse(change_part, settings=_DS)
-    if new_time:
+    # Date and/or time change
+    new_dt = dateparser.parse(change_part, settings=_DS)
+    if new_dt:
         current = calendar_client.get_event(event_id, calendar_id=calendar_id)
-        curr_start = datetime.fromisoformat(current["start"])
+        curr_start_str = current["start"]
+        is_all_day = "T" not in curr_start_str
+
+        if is_all_day:
+            if not _has_date_word(change_part):
+                return f"*{event['summary']}* is an all-day event — specify a date to move it (e.g. 'May 20')."
+            new_date = new_dt.date()
+            duration_days = (date.fromisoformat(current["end"]) - date.fromisoformat(curr_start_str)).days
+            new_end_date = new_date + timedelta(days=duration_days)
+            calendar_client.update_event(
+                event_id=event_id,
+                start_time=new_date.isoformat(),
+                end_time=new_end_date.isoformat(),
+                calendar_id=calendar_id,
+            )
+            if duration_days == 1:
+                return f"Moved *{event['summary']}* to {new_date.strftime('%a %b %-d')}."
+            end_disp = (new_end_date - timedelta(days=1)).strftime('%b %-d')
+            return f"Moved *{event['summary']}* to {new_date.strftime('%b %-d')}–{end_disp}."
+
+        curr_start = datetime.fromisoformat(curr_start_str)
         curr_end = datetime.fromisoformat(current["end"])
         duration = curr_end - curr_start
 
-        new_start = curr_start.replace(hour=new_time.hour, minute=new_time.minute, second=0, microsecond=0)
+        if _has_date_word(change_part):
+            # Date move — optionally with a new time too
+            if _has_time(change_part):
+                new_start = new_dt.astimezone(EASTERN).replace(second=0, microsecond=0)
+            else:
+                new_start = curr_start.replace(year=new_dt.year, month=new_dt.month, day=new_dt.day)
+        else:
+            # Time-only — keep original date
+            new_start = curr_start.replace(hour=new_dt.hour, minute=new_dt.minute, second=0, microsecond=0)
+
         new_end = new_start + duration
         offset = _offset(new_start)
         calendar_client.update_event(
@@ -659,9 +747,11 @@ def handle_edit(text: str) -> str:
             calendar_id=calendar_id,
         )
         t_disp = f"{new_start.strftime('%-I:%M %p')}–{new_end.strftime('%-I:%M %p')}"
-        return f"Updated *{event['summary']}* → {t_disp} on {target.strftime('%a %b %-d')}."
+        if _has_date_word(change_part):
+            return f"Moved *{event['summary']}* to {new_start.strftime('%a %b %-d')}, {t_disp}."
+        return f"Updated *{event['summary']}* → {t_disp} on {new_start.strftime('%a %b %-d')}."
 
-    return f"Didn't understand '{change_part}'. Try a time (3pm), 'location <addr>', or 'title <new name>'."
+    return f"Didn't understand '{change_part}'. Try a time (3pm), a date (May 20), 'location <addr>', or 'title <new name>'."
 
 
 # ─── /suggestions ─────────────────────────────────────────────────────────────

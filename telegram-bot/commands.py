@@ -15,6 +15,7 @@ Command handlers for the Telegram calendar bot.
 
 import os
 import re
+from collections import defaultdict
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta, date
 from zoneinfo import ZoneInfo
@@ -100,7 +101,7 @@ def complete_pending(pending: PendingEvent, color_id: str) -> str:
     if pending.reminder_minutes is not None:
         kwargs["reminder_minutes"] = pending.reminder_minutes
     result = calendar_client.create_event(**kwargs)
-    start = result["start"]
+    start = pending.start_time
     if "T" in start:
         dt = datetime.fromisoformat(start).astimezone(EASTERN)
         disp = dt.strftime("%a %b %-d, %-I:%M %p")
@@ -240,7 +241,7 @@ def _infer_color(title: str) -> str | None:
 
 def _infer_duration(title: str) -> int:
     """Return event duration in minutes."""
-    return 120 if any(m in title.lower() for m in LONG_MEALS) else 60
+    return 120 if any(meal in title.lower() for meal in LONG_MEALS) else 60
 
 
 def _offset(dt: datetime) -> str:
@@ -270,7 +271,6 @@ def _fmt_event(e: dict) -> str:
 
 def _fmt_grouped_events(header: str, events: list) -> str:
     """Format events grouped by day, with each day as a bold heading."""
-    from collections import defaultdict
     groups: dict[date, list] = defaultdict(list)
     for e in events:
         start = e["start"]
@@ -315,7 +315,7 @@ def _lookup_address(company: str) -> str | None:
 
 
 _DATE_RANGE_RE = re.compile(
-    r"\d{1,2}(?:st|nd|rd|th)?\s*[-–]\s*(?:\w+\s+)?\d{1,2}(?:st|nd|rd|th)?",
+    r"\d{1,2}(?:st|nd|rd|th)?\s*[-–]\s*(?:\w+\s+)?\d{1,2}(?:st|nd|rd|th)?(?!\s*(?:am|pm))",
     re.IGNORECASE,
 )
 
@@ -327,7 +327,7 @@ def _has_date_range(text: str) -> bool:
 def _parse_end_of_range(text: str, start: date) -> date:
     """Return the exclusive end date for a range like 'April 11-13', 'Aug 6th - Aug 9th', or 'May 29 to June 1'."""
     m = re.search(
-        r"(\w+)\s+(\d{1,2})(?:st|nd|rd|th)?\s*[-–to]+\s*(?:(\w+)\s+)?(\d{1,2})(?:st|nd|rd|th)?",
+        r"(\w+)\s+(\d{1,2})(?:st|nd|rd|th)?\s*(?:[-–]|\bto\b)\s*(?:(\w+)\s+)?(\d{1,2})(?:st|nd|rd|th)?",
         text, re.IGNORECASE,
     )
     if m:
@@ -517,6 +517,7 @@ def handle_add(text: str) -> str | PendingEvent:
                 end_time=outcome.end_time,
                 color_id=DEFAULT_COLOR,
                 calendar_id=calendar_id,
+                reminder_minutes=outcome.reminder_minutes,
                 **({"recurrence": outcome.recurrence} if outcome.recurrence else {}),
             )
             results.append(f"Added *{r['summary']}* (category unclear — used default color).")
@@ -644,7 +645,8 @@ def handle_edit(text: str) -> str:
             "Usage: /edit <title>, <date> > <change>\n"
             "Examples:\n"
             "  /edit dentist, May 15 > 3pm\n"
-            "  /edit lunch Rosie, May 17 > move to 1pm\n"
+            "  /edit dentist, May 15 > May 20\n"
+            "  /edit dentist, May 15 > May 20 3pm\n"
             "  /edit dentist, May 15 > location 123 Main St\n"
             "  /edit dentist, May 15 > title New Name"
         )

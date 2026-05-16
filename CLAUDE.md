@@ -87,6 +87,6 @@ Strong success criteria let you loop independently. Weak criteria ("make it work
 - Default (no prefix) → primary calendar (Calendar Zero)
 - `[pc]` prefix → Project Cook calendar
 
-**Deployment:** Heroku. The Procfile is inside `telegram-bot/`. The `.env` file is local-only and not committed.
+**Deployment:** Railway. The Procfile is inside `telegram-bot/`. Pushing to GitHub triggers an automatic Railway deploy. The `.env` file is local-only and not committed — env vars are set in the Railway dashboard.
 
 **Style:** Match the existing patterns in `commands.py` — dataclasses for pending state, `_DS` settings dict passed to dateparser, `_EASTERN` for all timezone work.

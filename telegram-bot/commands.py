@@ -133,8 +133,8 @@ HELP_TEXT = """\
   /edit dentist, May 15 > 3pm
   /edit dentist, May 15 > May 20
   /edit dentist, May 15 > May 20 3pm
-  /edit lunch Rosie, May 17 > location 123 Main St
-  /edit lunch Rosie, May 17 > title Dinner with Rosie
+  /edit dentist, May 15 > location 123 Main St
+  /edit dentist, May 15 > title New Name
   _Project Cook:_ /edit [pc] meeting, June 3 > 3pm
 
 `/delete <title>, <date>`
@@ -142,9 +142,11 @@ HELP_TEXT = """\
   _Batch:_ /delete dentist, May 15 : gym, May 16
   _Project Cook:_ /delete [pc] meeting, June 3
 
-`/summary` — this week's events with details (all calendars)
-`/week`    — next 7 days (all calendars)
-`/today`   — today's events (all calendars)
+`/on <date>`     — events on any specific day
+`/tomorrow`      — tomorrow's events
+`/today`         — today's events (all calendars)
+`/summary`       — this week's events with details (all calendars)
+`/week`          — next 7 days (all calendars)
 
 `/suggestions <note>`
   /suggestions add reminder support to events
@@ -351,6 +353,36 @@ def handle_today() -> str:
     if not events:
         return "Nothing on your calendar today."
     return "*Today:*\n" + "\n".join(_fmt_event(e) for e in events)
+
+
+def handle_tomorrow() -> str:
+    tomorrow = (datetime.now(EASTERN) + timedelta(days=1)).date()
+    day_start = datetime(tomorrow.year, tomorrow.month, tomorrow.day, tzinfo=EASTERN)
+    events = _list_all_events(
+        time_min=day_start.isoformat(),
+        time_max=(day_start + timedelta(days=1)).isoformat(),
+    )
+    if not events:
+        return "Nothing on your calendar tomorrow."
+    return "*Tomorrow:*\n" + "\n".join(_fmt_event(e) for e in events)
+
+
+def handle_on(text: str) -> str:
+    if not text:
+        return "Usage: /on <date>\nExamples:\n  /on tomorrow\n  /on Friday\n  /on June 3"
+    parsed = dateparser.parse(text, settings=_DS)
+    if not parsed:
+        return f"Couldn't parse '{text}'. Try: tomorrow, Friday, June 3."
+    target = parsed.date()
+    day_start = datetime(target.year, target.month, target.day, tzinfo=EASTERN)
+    events = _list_all_events(
+        time_min=day_start.isoformat(),
+        time_max=(day_start + timedelta(days=1)).isoformat(),
+    )
+    header = target.strftime("%A, %b %-d")
+    if not events:
+        return f"Nothing on {header}."
+    return f"*{header}:*\n" + "\n".join(_fmt_event(e) for e in events)
 
 
 def handle_week() -> str:

@@ -36,6 +36,19 @@ async def _send_weekly_summary() -> None:
         logger.exception("Error sending weekly summary")
 
 
+async def _send_morning_briefing() -> None:
+    global _owner_chat_id
+    if not _owner_chat_id:
+        logger.warning("No OWNER_CHAT_ID set — skipping morning briefing")
+        return
+    try:
+        text = commands.handle_today()
+        await _send(_owner_chat_id, text)
+        logger.info("Sent morning briefing to chat_id=%s", _owner_chat_id)
+    except Exception:
+        logger.exception("Error sending morning briefing")
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     scheduler = AsyncIOScheduler(timezone="America/New_York")
@@ -43,8 +56,12 @@ async def lifespan(app: FastAPI):
         _send_weekly_summary,
         CronTrigger(day_of_week="sun", hour=20, minute=0, timezone="America/New_York"),
     )
+    scheduler.add_job(
+        _send_morning_briefing,
+        CronTrigger(hour=7, minute=0, timezone="America/New_York"),
+    )
     scheduler.start()
-    logger.info("Scheduler started — weekly summary every Sunday 8:00 PM ET")
+    logger.info("Scheduler started — morning briefing 7:00 AM ET daily, weekly summary Sunday 8:00 PM ET")
     yield
     scheduler.shutdown()
 
@@ -79,6 +96,10 @@ def _route(text: str) -> str:
         return commands.handle_week()
     if cmd == "/today":
         return commands.handle_today()
+    if cmd == "/tomorrow":
+        return commands.handle_tomorrow()
+    if cmd == "/on":
+        return commands.handle_on(args)
     if cmd in ("/help", "/start"):
         return commands.HELP_TEXT
     if cmd == "/suggestions":
@@ -164,6 +185,13 @@ async def setup_webhook(request: Request):
 async def test_weekly_summary():
     """Manually trigger the Sunday notification for testing."""
     await _send_weekly_summary()
+    return {"ok": True, "sent_to": _owner_chat_id}
+
+
+@app.post("/test-morning-briefing")
+async def test_morning_briefing():
+    """Manually trigger the morning briefing for testing."""
+    await _send_morning_briefing()
     return {"ok": True, "sent_to": _owner_chat_id}
 
 

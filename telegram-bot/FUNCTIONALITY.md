@@ -131,6 +131,25 @@ Manages AVDG workday events on the recurring calendar entry.
 
 ---
 
+### `/on <date>`
+
+Shows events on any specific day across all calendars.
+
+```
+/on tomorrow
+/on Friday
+/on June 3
+/on next Monday
+```
+
+---
+
+### `/tomorrow`
+
+Shows tomorrow's events across all calendars.
+
+---
+
 ### `/today`
 
 Shows all events today, across all calendars (Calendar Zero + Project Cook).
@@ -169,8 +188,9 @@ Displays the command reference in Telegram.
 
 ## Automatic Notifications
 
-**Sunday 8:00 PM ET** — The bot sends a preview of the following week's events
-unprompted, grouped by day.
+**Daily 7:00 AM ET** — Morning briefing with today's events sent automatically.
+
+**Sunday 8:00 PM ET** — Preview of the following week's events, grouped by day.
 
 ---
 
@@ -188,12 +208,14 @@ from **all calendars** merged and sorted by start time.
 
 ## Infrastructure
 
-- **Platform:** Heroku (Procfile: `uvicorn main:app`)
+- **Platform:** Railway (auto-deploys from GitHub main branch)
+- **Procfile:** `web: uvicorn main:app --host 0.0.0.0 --port $PORT` (inside `telegram-bot/`)
 - **Webhook:** Telegram sends updates to `/webhook/{token}`
-- **Scheduler:** APScheduler fires the Sunday notification at 8 PM ET
+- **Scheduler:** APScheduler — morning briefing 7:00 AM ET daily, weekly summary Sunday 8:00 PM ET
 - **Auth:** Google OAuth2 via refresh token (env vars: `GOOGLE_CLIENT_ID`,
   `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN`)
 - **Internal endpoints:**
   - `POST /setup-webhook` — register Telegram webhook after deploy
+  - `POST /test-morning-briefing` — manually trigger the morning briefing
   - `POST /test-weekly-summary` — manually trigger the Sunday notification
   - `GET /health` — liveness check

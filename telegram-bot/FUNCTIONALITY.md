@@ -208,8 +208,19 @@ Displays the command reference in Telegram.
 | *(none)* | Calendar Zero (primary) |
 | `[pc]` | Project Cook (shared with collaborator) |
 
-Read commands (`/today`, `/week`, `/summary`, Sunday preview) always show events
-from **all calendars** merged and sorted by start time.
+Read commands (`/today`, `/tomorrow`, `/week`, `/on`, `/summary`, Sunday preview)
+always show events from **all calendars** merged and sorted by start time.
+
+## Access Control
+
+| Role | How to set | Access |
+|---|---|---|
+| Owner | `OWNER_CHAT_ID` env var | All commands |
+| Collaborator | `PC_COLLABORATOR_IDS` env var (comma-separated chat IDs) | Read commands + `[pc]`-prefixed `/add`, `/edit`, `/delete` |
+| Unknown | — | Silently ignored |
+
+To add a collaborator, get their Telegram chat ID (they can message @userinfobot)
+and add it to `PC_COLLABORATOR_IDS` in the Railway dashboard.
 
 ---
 

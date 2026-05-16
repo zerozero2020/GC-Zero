@@ -21,6 +21,26 @@ TELEGRAM_API = f"https://api.telegram.org/bot{TOKEN}"
 
 _pending: dict[int, commands.PendingEvent] = {}
 _owner_chat_id: int | None = int(os.environ["OWNER_CHAT_ID"]) if os.environ.get("OWNER_CHAT_ID") else None
+_PC_COLLABORATOR_IDS: set[int] = {
+    int(x.strip()) for x in os.environ.get("PC_COLLABORATOR_IDS", "").split(",") if x.strip()
+}
+
+# Commands collaborators can use without [pc] prefix
+_READ_CMDS = {"/today", "/tomorrow", "/week", "/on", "/summary", "/help", "/start"}
+# Commands collaborators can use only when args begin with [pc]
+_PC_WRITE_CMDS = {"/add", "/edit", "/delete"}
+
+
+def _is_owner(chat_id: int) -> bool:
+    return chat_id == _owner_chat_id
+
+
+def _is_collaborator(chat_id: int) -> bool:
+    return chat_id in _PC_COLLABORATOR_IDS
+
+
+def _is_known(chat_id: int) -> bool:
+    return _is_owner(chat_id) or _is_collaborator(chat_id)
 
 
 async def _send_weekly_summary() -> None:
@@ -120,6 +140,11 @@ async def _handle(data: dict) -> None:
         _owner_chat_id = chat_id
         logger.info("Owner chat_id set to %s", chat_id)
 
+    # Silently drop messages from unknown users
+    if not _is_known(chat_id):
+        logger.info("Rejected unknown chat_id=%s", chat_id)
+        return
+
     logger.info("Incoming from chat_id=%s: %r", chat_id, text)
 
     if not text:
@@ -144,6 +169,21 @@ async def _handle(data: dict) -> None:
     if not text.startswith("/"):
         await _send(chat_id, "Send a command — try /help to see what's available.")
         return
+
+    # Collaborators are restricted to read commands and [pc]-prefixed write commands
+    if _is_collaborator(chat_id):
+        parts = text.split(None, 1)
+        cmd = parts[0].lower()
+        args = parts[1].strip() if len(parts) > 1 else ""
+        if cmd not in _READ_CMDS:
+            if cmd in _PC_WRITE_CMDS and args.lower().startswith("[pc]"):
+                pass  # allowed
+            elif cmd in _PC_WRITE_CMDS:
+                await _send(chat_id, f"You can only manage Project Cook events. Add [pc] to your command — e.g. `{cmd} [pc] ...`")
+                return
+            else:
+                await _send(chat_id, f"You don't have access to {cmd}.")
+                return
 
     try:
         reply = _route(text)

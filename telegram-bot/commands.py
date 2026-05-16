@@ -133,6 +133,7 @@ HELP_TEXT = """\
   /edit dentist, May 15 > 3pm
   /edit dentist, May 15 > May 20
   /edit dentist, May 15 > May 20 3pm
+  /edit dentist, May 15 > category appt
   /edit dentist, May 15 > location 123 Main St
   /edit dentist, May 15 > title New Name
   _Project Cook:_ /edit [pc] meeting, June 3 > 3pm
@@ -679,6 +680,7 @@ def handle_edit(text: str) -> str:
             "  /edit dentist, May 15 > 3pm\n"
             "  /edit dentist, May 15 > May 20\n"
             "  /edit dentist, May 15 > May 20 3pm\n"
+            "  /edit dentist, May 15 > category appt\n"
             "  /edit dentist, May 15 > location 123 Main St\n"
             "  /edit dentist, May 15 > title New Name"
         )
@@ -723,6 +725,14 @@ def handle_edit(text: str) -> str:
     event = events[0]
     event_id = event["id"]
     change_lower = change_part.lower()
+
+    if change_lower.startswith("category ") or change_lower.startswith("color "):
+        cat_text = change_part.split(None, 1)[1].strip().lower()
+        color_id = _CATEGORY_MAP.get(cat_text)
+        if color_id is None:
+            return f"Unknown category '{cat_text}'. Options: friends, trip, appt, birthday, avdg, christine, none (or 1–7)."
+        calendar_client.update_event(event_id=event_id, color_id=color_id, calendar_id=calendar_id)
+        return f"Updated *{event['summary']}* — category set to {COLOR_NAMES.get(color_id, 'No color')}."
 
     if change_lower.startswith("location "):
         loc = change_part.split(None, 1)[1]

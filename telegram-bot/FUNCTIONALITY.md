@@ -71,6 +71,13 @@ Edits an existing event. Finds the event by title + date, then applies the chang
 /edit dentist, May 15 > May 20 3pm
 ```
 
+**Category/color:**
+```
+/edit dentist, May 15 > category friends
+/edit dentist, May 15 > category 1
+```
+Valid: `friends`, `trip`, `appt`, `birthday`, `avdg`, `christine`, `none` (or numbers 1–7).
+
 **Location:**
 ```
 /edit dentist, May 15 > location 123 Main St
